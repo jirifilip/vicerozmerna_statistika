@@ -1,0 +1,5 @@
+"0","data.spss <- read.csv(""data/ukol1.csv"")"
+"0","#write.csv(data.spss, ""data.csv"")"
+"0","data.raw <- tbl_df(data.spss)"
+"0","rowname_labels <- sapply(data.spss, function (col) attr(col, ""label"")) %>% unname %>% unlist"
+"0","colname_labels <- c(""id"", ""Obvod ramen"", ""Obvod hrudníku"", ""Obvod pasu"", ""Obvod boků"", ""Obvod lýtka (průměr)"", ""Obvod zápěstí (průměr)"")"

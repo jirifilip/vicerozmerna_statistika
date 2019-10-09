@@ -1,0 +1,151 @@
+---
+title: "Úkol 2 - Průzkumová faktorová analýza"
+subtitle: "4ST512 Vícerozměrná statistika"
+author: "Jiří Filip"
+output: pdf_document
+---
+
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+```
+
+```{r include = FALSE}
+
+library(foreign)
+library(tidyverse)
+library(bootstrap)
+library(ggfortify)
+library(MVN)
+library(haven)
+library(reshape)
+library(car)
+library(gridExtra)
+library(psych)
+library(GPArotation)
+```
+
+# Úvod
+
+V této práci se zaměříme na analýzu preferencí čtenářů. V šetření se vydavatel časopisu zeptal 800 respondentů, o která z 26 nadefinovaných témat se zajímají. Pokusíme se odpovědět na otázku, zda zájem o jednotlivá témata lze vysvětlit menším počtem faktorů. Tyto faktory se pokusíme interpretovat a následně identifikovat a shrnout výsledky analýzy, případně její nedostatky.
+
+
+
+
+```{r}
+data.spss <- read.csv("data/ukol2.csv")[,-1]
+
+data.raw <- tbl_df(data.spss)
+
+
+labs <- c(
+  "bydlení / domov",
+  "ekonomika",
+  "horoskopy / astrologie",
+  "hudba / muzika",
+  "inzerce",
+  "kino / film",
+  "krása a vlasy",
+  "kresby a karikatury",
+  "kriminalita / černá kronika",
+  "křížovky / hádanky / soutěže",
+  "nemovitosti / domy",
+  "obchod",
+  "počítače",
+  "politika",
+  "práce / zaměstnání",
+  "programy televize / přehledy pořadů",
+  "přehledy kulturních akcí",
+  "příroda / životní prostředí",
+  "regionální zprávy z okolí kde žiji",
+  "sex / erotika",
+  "sport",
+  "zábava",
+  "zahrada / zahrádka / pěstitelství",
+  "zprávy z České republiky",
+  "zprávy ze zahraničí",
+  "ženské stránky / ženská témata"
+)
+
+```
+
+# Posouzení dat
+
+Jako první posoudíme, zda jsou data vhodná pro použití faktorové analýzy. K tomu nám poslouží dva testy - KMO a Bartlettův test. Míra KMO 0.92 je velice dobrý výsledek a znamená, že data jsou vhodná pro faktorovou analýzu.
+
+Bartlettův test si klade otázku, zda jsou rozptyly jednotlivých proměnných stejné nebo ne. Výsledek nám říká, že na hladině významnosti 0.05 (kterou jsme si předem zvolili) můžeme zamítnout hypotézu o homogenitě rozptylů jednotlivých proměnných.
+
+
+```{r}
+KMO(data.raw)
+bartlett.test(data.raw)
+```
+
+Pro zjistění vhodného počtu faktorů použijeme metodu Parallel Analysis. Ta srovnává vlastní hodnoty faktorové analýzy pro naše data a pro náhodná data vygenerovaná pomocí monte carlo simulace. Vidíme, že u pátého faktoru se již blížíme k červené čáře, která udává vlastní hodnoty faktorů náhodných dat. Ideální počet faktorů by tak mohl být 3-4. Doplňující výstup programu (pro přehlednost neuvedeno) sice navrhuje počet faktorů jako 7, ale je vidět, že od pátého faktoru se reálné faktory a faktory na náhodných datech liší minimálně.
+
+I tak faktorovou analýzu se sedmi faktory pro úplnost zkusíme spustit.
+
+```{r echo=FALSE,results='hide',fig.keep='all'}
+#par(mfrow=c(1, 2))
+paral <- fa.parallel(data.raw, fm = "minres", fa = "fa") %>% invisible()
+#screeplot(data.pca, npcs = 27, type = "lines", main = "Analýza hlavních komponent")
+
+```
+
+# Faktorová analýza
+
+Před provedením samotné analýzy ještě uvažujme, co jednotlivé faktory budou znamenat. Jelikož naše jednotlivé proměnné jsou témata, budou jednotlivé faktory představovat jakási "nadtémata" či okruhy témat, např. zpravodajství, koníčky, zábava. Z tohoto důvodu by dávalo smysl, že by se jednotlivá nadtémata mohla z části překrývat. Zkusme však nejprve nalézt vhodné řešení, kde jsou faktory nekorelované (tedy témata se nepřekrývají). Pokud budeme s výsledky nespokojeni, připustíme korelaci jednotlivých faktorů. 
+
+
+Proveďme tedy faktorovou analýzu a zobrazme faktorové zátěže, které jsou větší než 0.3. Vyextrahujeme 3 faktory a použijeme rotaci "varimax", protože chceme, aby jednotlivé faktory byly nekorelované.
+
+Jak lze vidět, faktor č. 3 lze interpretovat jako zájem o zpravodajství. Faktor 2 lze interpretovat jako zájem o jakousi "zábavu", i když tuto interpretaci poněkud kazí fakt, že do něj výrazně přispívá ekonomika, obchod a méně výrazně politika. Faktor č. 1 je potom další "zábavní" mix, hůře intepretovatelný než faktor č. 2.
+
+Vidíme, že faktorová analýza se třemi faktory má řadu nedostatků, zkusme proto zvolit faktory čtyři.
+
+```{r}
+colnames(data.raw) <- labs
+
+threefactor <- fa(data.raw, nfactors = 3, rotate = "varimax")
+print(threefactor$loadings, cutoff = 0.3)
+
+```
+
+Zde nám čtvrtý faktor trochu konkretizuje onen termín "zábava". Zahrnuje zde kino, film, hudbu, sport, zábavu a programy televize a pořadů. Tento faktor tak můžeme intepretovat jako "zájem o pasivní zábavu" (s výjimkou sportu, ale toto téma lze intepretovat např. jako články o fotbalových, hokejových zápasech apod.).
+
+Třetí faktor ukazuje zájem o zpravodajství. Druhý faktor lze kvůli převaze některých témat (krása a vlasy, horoskopy, ženská témata) trochu stereotypně charakterizovat jako "ženská témata" nebo témata, o něž mají zájem převážně ženy. První by pak šlo - opět se značným stereotypem - charakterizovat jako "mužská" témata, především kvůli zahrnutí počítačů, nemovitostí a domů, ekonomiky a sportu. Je jasné, že tento termín plně první faktor nevystihuje, ale pokud bychom ho chtěli nějak kontrastovat vůči druhému faktoru, můžeme ho pojmenovat právě takto.
+
+
+
+```{r}
+fourfactor <- fa(data.raw, nfactors = 4, rotate = "varimax")
+print(fourfactor$loadings, cutoff = 0.3)
+```
+
+Analýza s pěti faktory byla rovněž vyzkoušena, ale nijak se jí nepodařilo "rozmělnit" první a druhý faktor na více detailů. Rovněž bylo vyzkoušeno i 6 a 7 faktorů, které zde však neuvádím kvůli přehlednosti. Ani jedna varianta nebyla uspokojivější ani lépe interpretovatelná než výše uvedené.
+
+```{r echo=FALSE, results="hide"}
+fivefactor <- fa(data.raw, nfactors = 5, rotate = "varimax")
+print(fivefactor$loadings, cutoff = 0.3)
+```
+
+
+
+
+Analýza se čtyřmi faktory pomocí rotace varimax byla celkově uspokojující, ale pro zlepšení výsledků ještě zkusme rotaci oblimin, která povoluje korelaci jednotlivých faktorů.
+
+Zde faktory dva až čtyři představují zpravodajství, ženská témata a pasivní zábavu, přičemž první faktor by se taky dal považovat za jakousi zábavu, nyní však s mixem politiky, ekonomiky apod.
+
+Tato varianta poskytuje ze všech nejslibnější výsledky. Právě toto řešení bych volil jako výsledné a prezentoval bych ho vydavateli časopisu. Je zde vhodný počet faktorů a každý z nich (s výjimkou trochu více obecnějšího prvního faktoru) nese ucelenou informaci o zájmu čtenáře. Jak již bylo uvedeno, přidáním dalších faktorů se nedaří "rozmělnit" první faktor "zábavy" na něco více konkrétního, a tak zůstáváme u faktorů čtyř. 
+
+
+```{r}
+fivefactor.ob <- fa(data.raw, nfactors = 4, rotate = "oblimin")
+print(fivefactor.ob$loadings, cutoff = 0.3)
+```
+
+# Shrnutí
+
+V předchozím odstavci již byla uvedena pozitiva výsledného řešení, a sice charakteristika jednotlivých "nadtémat" a rozpoznání preference čtenářů.
+
+Nedostatky analýzy vidím v příliš všeobecném prvním faktoru. I tak ale výsledná analýza poskytuje zadavateli přehled o rozdělení zájmu jednotlivých čtenářů časopisu. Rozděluje témata na pasivní zábavu, zpravodajství, ženská témata a zbytkovou "všehochuť". Vydavatel může informace z této analýzy využít k přizpůsobení obsahu čtenářům či výsledky může využít jako odrazový můstek k provedení podrobnější analýzy, např. s jinými nástroji.

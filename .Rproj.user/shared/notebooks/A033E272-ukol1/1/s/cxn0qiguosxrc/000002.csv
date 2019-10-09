@@ -1,0 +1,6 @@
+"0","data.raw_gathered %>%"
+"0","  ggplot(aes(value)) +"
+"0","    facet_wrap(~ key, scales = ""free"") +"
+"0","    geom_histogram(bins=30) +"
+"0","    xlab(""Hodnota"") +"
+"0","    ylab(""Počet"") %>% invisible()"

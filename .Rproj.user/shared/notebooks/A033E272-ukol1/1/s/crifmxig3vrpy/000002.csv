@@ -1,0 +1,7 @@
+"0","data.raw_gathered %>%"
+"0","  ggplot(aes(sample = value)) +"
+"0","    facet_wrap(~ key, scales = ""free"") +"
+"0","    stat_qq() +"
+"0","    stat_qq_line() +"
+"0","    ylab(""Výběr"") +"
+"0","    xlab(""Teoretické"")"

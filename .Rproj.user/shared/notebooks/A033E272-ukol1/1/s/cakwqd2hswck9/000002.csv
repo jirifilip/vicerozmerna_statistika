@@ -1,0 +1,5 @@
+"0","colnames(data.raw) <- colname_labels"
+"0","data.raw_gathered <- "
+"0","  data.raw[,-1] %>%"
+"0","  keep(is.numeric) %>%"
+"0","  gather()"

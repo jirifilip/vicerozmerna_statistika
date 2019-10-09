@@ -1,0 +1,264 @@
+---
+title: "Úkol 4 - Diskriminační analýza"
+subtitle: "4ST512 Vícerozměrná statistika"
+author: "Jiří Filip"
+output: 
+  pdf_document:
+    df_print: kable
+---
+
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+```
+
+```{r include = FALSE}
+
+library(foreign)
+library(tidyverse)
+library(bootstrap)
+library(ggfortify)
+
+library(haven)
+library(reshape)
+
+library(gridExtra)
+
+library(MASS)
+library(caret)
+
+library(klaR)
+library(mvoutlier)
+library(HH)
+
+library(biotools)
+library(corrplot)
+
+select <- dplyr::select
+```
+
+
+```{r}
+data.raw <- data.csv("data/ukol4.csv")
+    
+variable.names <- c("Obvod břicha", "Obvod předloktí (průměr)", "Obvod kolene (průměr)")
+
+data.train <-
+  data.raw %>%
+    filter(pohlavi != 0) %>%
+    mutate(pohlavi = factor(pohlavi, labels = c("muž", "žena")))  
+
+data.test <- 
+  data.raw %>%
+    filter(pohlavi == 0) %>%
+    mutate(pohlavi = factor(pohlavi))  
+```
+# Úvod
+
+V této analýze se budeme zaobírat údaji o tělesných rozměrech mužů a žen (obvod břicha, předloktí a kolene) a do jaké míry lze tyto rozměry využít k rozhodnutí o pohlaví jedince. Využijeme metodu Lineární diskriminační analýzy (LDA). Data rovněž obsahují údaje o 10 jedincí neznámého pohlaví, jež se pokusíme zařadit buďto jako muže, nebo ženu.
+
+```{r}
+head(data.train)
+```
+
+# Průzkum dat z hlediska předpokladů LDA
+
+Nejprve data prozkoumáme z hlediska předpokladů diskriminační analýzy. Data popisují muže a ženy a jejich tělesné rozměry. Naším cílem bude na základě těchto tělesných rozměrů rozhodnout o pohlaví deseti neznámých jedinců.
+
+
+
+## Průměry
+
+Nejprve se podívejme, jak se jednotlivé třídy (muž a žena) liší, co se týče průměrů tělesných rozměrů. Vidíme, že všechny rozměry se nějakým způsobem liší - to nám dopomůže k lepší diskriminaci pohlaví. 
+
+```{r}
+data.train %>%
+  select(pohlavi, o4, o8, o9) %>%
+  group_by(pohlavi) %>%
+  summarise(o4 = mean(o4), o8 = mean(o8), o9 = mean(o9))
+```
+
+## Směrodatné odchylky
+
+Stejně tak se podívejme na směrodatné odchylky rozměrů. Ty nám (společně s informacemi o průměrech) dávají nějakou představu o tom, jak se jednotlivé distribuce rozměrů ve třídách (muž a žena) překrývají. Vidíme, že u prvního rozměru se odchylky liší výrazně, u druhých dvou už méně (až zanedbatelně). Toto by však mohlo být způsobeno jinou škálou, kdy desetinný rozdíl u druhých dvou rozměrů znamená více než u prvního.
+
+```{r}
+data.train %>%
+  select(pohlavi, o4, o8, o9) %>%
+  group_by(pohlavi) %>%
+  summarise(o4 = sd(o4), o8 = sd(o8), o9 = sd(o9))
+```
+
+## Shapirův-Wilkův test
+
+Další tabulka představuje výsledky (p-hodnoty) Shapirova-Wilkova testu s nulovou hypotézou o normalitě dat. Lze vidět, že na hladině významnosti 5 % můžeme zamítnout hypotézu o normalitě dat u všech obvodů ženy a u prvního obvodu muže.
+
+```{r}
+options(scipen = 10)
+
+data.train %>%
+  select(pohlavi, o4, o8, o9) %>%
+  group_by(pohlavi) %>%
+  summarise(o4 = shapiro.test(o4)$p.value, o8 = shapiro.test(o8)$p.value, o9 = shapiro.test(o9)$p.value)
+```
+
+
+
+## Kovarianční matice
+
+Porovnejme ještě konvarianční matice mužů a žen. Vidíme, že se dvě kovarianční matice od sebe značně liší.
+
+### Muž
+
+```{r}
+cov(data.train %>% filter(pohlavi == "muž") %>% select(o4, o8, o9)) %>% tbl_df
+```
+
+
+### Žena
+
+```{r}
+cov(data.train %>% filter(pohlavi == "žena") %>% select(o4, o8, o9)) %>% tbl_df
+```
+
+To potvrzuje i Boxův M test, u něhož na hladině významnosti 5 % zamítáme hypotézu o homogenitě kovariančních matic.
+
+```{r}
+#boxM
+boxM(data.train %>% select(o4, o8, o9), data.train$pohlavi)
+```
+
+Pro přehled si ještě zobrazme jednotlivá rozdělení tělesných rozměrů pro muže a pro ženy. Vidíme, že zdaleka nejméně se překrývají dvě rozdělení u obvodu předloktí. Očekávali bychom tak, že obvod předloktí bude nejlépe diskriminovat. 
+
+```{r fig.height=5}
+
+pl1 <-
+  data.train[,c("pohlavi", "o4")] %>%
+    ggplot() +
+    geom_density(aes(o4, fill = pohlavi), alpha = 0.5) +
+    ggtitle("Obvod břicha") +
+    theme(plot.title = element_text(hjust = 0.5))
+
+pl2 <- 
+  data.train[,c("pohlavi", "o8")] %>%
+    ggplot() +
+    geom_density(aes(o8, fill = pohlavi), alpha = 0.5) +
+    ggtitle("Obvod předloktí (průměr)") +
+    theme(plot.title = element_text(hjust = 0.5))
+
+
+pl3 <- 
+  data.train[,c("pohlavi", "o9")] %>%
+    ggplot() +
+    geom_density(aes(o9, fill = pohlavi), alpha = 0.5) +
+    ggtitle("Obvod kolene (průměr)") +
+    theme(plot.title = element_text(hjust = 0.5))
+
+
+grid.arrange(pl1, pl2, pl3)
+```
+
+# LDA
+
+Nyní spusťme LDA na trénovacích datech a podívejme se na jednotlivé koeficienty u diskriminační funkce. Největší absolutní hodnota koeficientu je právě u obvodu předloktí, a sice $ 0.754 $. Nejhůře potom diskriminuje obvod břicha s absolutní hodnotou koeficientu $ 0.039 $.
+
+```{r}
+fit <- lda(pohlavi ~ o4 + o8 + o9, data.train)
+```
+
+$$ LD_1 = (0.039 * o4) + (-0.754 * o8) + (0.148 * o9)  $$
+
+Zde vidíme jednotlivé hodnoty transformované pomocí lineární diskriminační funkce. Vidíme zde rozdělení pro muže a ženy a lze vidět, že po transformaci se překrývají jen v menší části uprostřed. 
+
+```{r}
+data.train.scaled <- 
+  data.train %>%
+    mutate(o4 = scale(o4), o8 = scale(o8), o9 = scale(o9))
+
+data.test.scaled <- 
+  data.test %>%
+    mutate(o4 = scale(o4), o8 = scale(o8), o9 = scale(o9))
+
+train.lda.fit <- lda(pohlavi ~ o4 + o8 + o9, data.train.scaled)
+
+data.train.matrix <- 
+  data.train.scaled %>%
+    select(o4, o8, o9) %>%
+      as.matrix()
+
+data.discriminated <- t(t(train.lda.fit$scaling) %*% t(data.train.matrix)) %>% as.data.frame()
+
+data.discriminated$LD2 <- rep(1, nrow(data.discriminated))
+data.discriminated$class <- data.train$pohlavi
+
+data.discriminated %>% 
+  ggplot() +
+  geom_density(aes(LD1, fill = class), alpha = 0.8)
+
+#plot(fit, type="both")
+```
+
+Zde můžeme vidět, jak lze pohlaví rozdělit na původním prostoru proměnných. Červeně jsou označeny instance, jež jsou nesprávně klasifikovány. Ze zběžného pohledu můžeme vidět, že většina instancí je správně klasifikována a pouze malá část jich je zabarvena červeně. To nám napovídá, že klasifikace má vysokou přesnost. Pojďme se nyní na tuto přesnost podívat v konkrétních číslech.
+
+```{r}
+partimat(pohlavi ~ o4 + o8 + o9, data = data.train, method = "lda", plot.matrix = TRUE, name = variable.names)
+```
+
+
+
+
+
+# Ověření na trénovacích datech
+
+Nyní predikujme hodnoty pohlaví za základě dat, s nimiž jsme spustili LDA a podívejme se na matici záměn. Vidíme, že na trénovací množině je odhad přesnosti LDA přibližně $93 \%$. LDA chybně predikovalo 12 žen jako muže a 24 mužů jako ženy.
+Kromě toho se zde vyskytují údaje jako sensitivita a specificita. Sensitivita nám říká, že přibližně $ 90 \% $ mužů bylo správně klasifikováno jako muži. Specificita nám pak říká, že přiblížně $ 95 \% $ žen bylo správně klasifikováno jako ženy.
+
+
+```{r}
+data.train.predicted <- predict(fit, data.train)
+data.train$lda_prediction <- data.train.predicted$class
+
+data.test.predicted <- predict(fit, data.test)
+data.test$lda_prediction <- data.test.predicted$class
+
+confusionMatrix(data.train$lda_prediction, data.train$pohlavi)
+```
+
+Přesnost byla však vypočtena na trénovacích datech (na nichž jsme LDA spustili). Pro spolehlivější odhad přesnosti použijeme desetinásobnou křížovou validaci. Průměrná přesnost napříč deseti validacemi je přibližně $ 93 \% $. Tedy stejně, jako kdybybychom použili k ověření jen trénovací data. Získali jsme tedy relativně přesný odhad. Máme jistotu přibližně $ 93 \% $, že jedince správně klasifikujeme.
+
+```{r}
+ldaFit <- train(pohlavi ~ o4 + o8 + o9, data = data.train, method = "lda", preProcess = c("center", "scale"), trControl = trainControl(method = "cv"), tuneLength = 10)
+
+confusionMatrix.train(ldaFit)
+```
+
+# Jistota klasifikace nových instancí
+
+Následující graf zobrazuje, s jakou pravděpodobností náleží jedinec do dané třídy. Můžeme z něj vyčíst, zda si můžeme být klasifikací jistí (v případě, kdy jasně převládá velikost pravděpodobnosti jednoho z pohlaví), nebo ne (v případě, kdy jsou velikosti téměř vyrovnané).
+
+```{r echo=FALSE, results="hide", warning=FALSE, message=FALSE}
+test.pred.viz <- data.test.predicted %>% as.data.frame()
+test.pred.viz$instance <- 1:nrow(test.pred.viz)
+test.pred.viz <- 
+  test.pred.viz %>%
+    select(-class, -LD1)
+
+
+
+test.pred.viz2 <- test.pred.viz %>% select(instance, posterior.muž, posterior.žena) %>% mutate(instance = as.factor(instance)) %>% melt
+
+ggplot(test.pred.viz2, aes(instance, value, fill = variable)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  xlab("Jedinec") +
+  ylab("Pravděpodobnost") +
+  scale_fill_manual(values = c("#56B4E9", "#E69F00"))
+
+
+```
+
+Zde už vidíme zařazení jednotlivých jedinců do tříd (pohlaví) podle té pravděpodobnější z nich.
+
+```{r}
+data.frame(Jedinec = 1:10, Pohlaví = data.test.predicted$class)
+```
+

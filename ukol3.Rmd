@@ -1,0 +1,215 @@
+---
+title: "Úkol 3 - Shluková analýza"
+subtitle: "4ST512 Vícerozměrná statistika"
+author: "Jiří Filip"
+output: pdf_document
+---
+
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+```
+
+```{r include = FALSE}
+
+library(foreign)
+library(tidyverse)
+library(bootstrap)
+library(ggfortify)
+library(MVN)
+library(haven)
+library(reshape)
+library(car)
+library(gridExtra)
+library(psych)
+library(GPArotation)
+
+library(cluster)
+library(factoextra)
+library(dendextend)
+```
+
+# Úvod
+
+Cílém této práce je provést shlukovou analýzu na datech, jež obsahují údaje (např. cena, objem válců, výkon, maximální rychlost) o 136 modelech automobilů. Data obsahují pouze vozy vybraných značek do cenového limitu 40 000 EUR a každý model je zastoupen vždy nejlevnějším typem v nabídce.
+
+Naším cílem bude vybrat minimálně 3 a maximálně 12 proměnných k identifikaci tržních segmentů. Výběr těchto proměnných bude důkladně zdůvodněn a popsán. K segmentaci použijeme shlukovou analýzu a rovněž popíšeme, proč jsme zvolil zrovna tu danou metodu.
+
+Výsledné shluky interpretujeme a popíšeme kroky, kterými se nám podařilo je najít.
+
+```{r}
+data.spss <- read.csv("data/ukol3.csv")
+
+data.raw <- tbl_df(data.spss)
+
+data.spss %>% View
+
+#data_labels <- data.spss %>% map_chr(~attributes(.)$label) %>% unname
+
+
+```
+
+# Průzkum dat
+
+K průzkumu dat využijeme metodu hlavních komponent. Této metody využijeme zejména proto, že později budeme zobrazovat výsledné shluky na projekci proměnných do podprostoru prvních dvou hlavních komponent.
+
+Na grafu můžeme vidět, že vpravo v dolním rohu je jedno odlehlé pozorování. Jde o pozorování č. 45 (Hummer H3). Z dat ho odstraníme. 
+
+Z grafu dále vidíme, že pro vysvětlení variability dat by byla vhodná jedna z proměnných x5 (zrychlení) nebo x4 (vektory zátěží napovídají, že jsou negativně korelované), dále proměnná x13 (výška) a rozumně vybrané další proměnné, jejichž vektory zátěží nejsou příliš blízko sebe (což by znamenalo korelaci).
+
+```{r}
+data.raw %>% View
+
+data.pca <- data.raw
+data.pca["model_clust_pca"] <- substr(data.pca$model, 1, 2)
+data.pca %>% View
+
+pca <- princomp(data.raw[,-1], cor = TRUE)
+
+autoplot(pca, data = data.pca, loadings = TRUE, loadings.label = TRUE)
+
+
+```
+```{r}
+# odstranění odlehlého pozorování
+data.raw <- data.raw[-45,]
+```
+
+# Určení počtu shluků
+
+Nakonec jsme se rozhodli pro využití nehierarchického shlukování a algoritmu K-means. Toto rozhodnutí plyne z toho, že máme spíše zájem o provedení tržní segmentace na nějaký počet shluků než provedení rozpadu (nebo spojení) segmentů. Určitě by bylo zajímavé pokusit se interpretovat, jak je nějaký tržní segment tvořen jinými, menšími segmenty, ale pro účely jednoduchosti použijeme algoritmus K-means s určeným počtem shluků.
+
+Algoritmus K-means nalezne lokální optimum, proto algoritmus spustíme několikrát, abychom si byli jisti, že jsme nalezli uspokojivé řešení.
+
+Nyní zbývá se rozhodnout, kolik shluků necháme vytvořit. K tomu nám dopomůžou dva grafy. Jeden z nich zobrazuje součet čtverců mezishlukových vzdáleností (které se snažíme minimalizovat). Vídíme pak, že graf se "láme" přibližně na 3 - 5 shlucích.  
+
+```{r fig.height=3}
+fviz_nbclust(data.raw[,-1], kmeans, method = "wss")
+```
+
+Druhý graf (velmi stručně) udává, do jaké míry spolu prvky ve shluku "sounáleží". Vidíme, že od 2 do přibližně 7 shluků se funkce pohybuje kolem svého maxima.
+
+```{r fig.height=3}
+fviz_nbclust(data.raw[,-1], kmeans, method = "silhouette")
+```
+
+# Shluková analýza
+
+Uvažujme tedy shluky tři. Ostatní počty byly rovněž vyzkoušeny, ale zdaleka nejlepší výsledky jsme dostali právě se třemi shluky. Jako proměnné, jež pro segmentaci využijeme, zvolme Maximální rychlost, Výšku, Výkon, Spotřeba - kombinovaná, Objem válců. Tyto proměnné byly vybrány na základě grafu dvou hlavních komponent a zátěží všech proměnných. Vybrali jsme proměnné, které - co se vysvětlení rozptylu týče - spolu nejsou značně korelovány (pozitivně i negativně).
+
+```{r}
+data.processed <- data.raw[,c("x4", "x13", "x3", "x8", "x2")] %>% scale()
+
+data.kmeans1 <- kmeans(data.processed, centers = 3)
+
+data.clusters1 <- data.raw
+data.clusters1["cluster"] <- as.factor(data.kmeans1$cluster)
+
+set.seed(155555)
+autoplot(data.kmeans1, data = data.processed, frame = TRUE)
+```
+
+# Interpretace shluků
+
+Zobrazme si nyní histogramy jednotlivých proměnných podle shluků a pokusme se je interpretovat.
+
+```{r fig.height=10, fig.width=15}
+pl1 <- 
+  data.clusters1 %>%
+    ggplot() +
+    geom_histogram(aes(x1), bins = 15) +
+    facet_wrap(~cluster) +
+    xlab("Cena (EUR)") +
+    ylab("Množství") +
+    ggtitle("Cena (EUR)")
+    
+pl2 <- 
+  data.clusters1 %>%
+    ggplot() +
+    geom_histogram(aes(x2), bins = 8) +
+    facet_wrap(~cluster) +
+    xlab("Objem válců (ccm)") +
+    ylab("Množství (ccm)") +
+    ggtitle("Objem válců (ccm)")
+    
+pl3 <- 
+  data.clusters1 %>%
+    ggplot() +
+    geom_histogram(aes(x3), bins = 15) +
+    facet_wrap(~cluster) +
+    xlab("Výkon (kW)") +
+    ylab("Množství") +
+    ggtitle("Výkon (kW)")
+
+pl4 <- 
+  data.clusters1 %>%
+    ggplot() +
+    geom_histogram(aes(x4), bins = 15) +
+    facet_wrap(~cluster) +
+    xlab("Maximální rychlost (km/h)") +
+    ylab("Množství") +
+    ggtitle("Maximální rychlost (km/h)")
+
+pl5 <- 
+  data.clusters1 %>%
+    ggplot() +
+    geom_histogram(aes(x5), bins = 15) +
+    facet_wrap(~cluster) +
+    xlab("Zrychlení 0 - 100 km/h (s)") +
+    ylab("Množství") +
+    ggtitle("Zrychlení 0 - 100 km/h (s)")
+
+pl6 <- 
+  data.clusters1 %>%
+    ggplot() +
+    geom_histogram(aes(x10), bins = 15) +
+    facet_wrap(~cluster) +
+    xlab("Hmotnost (kg)") +
+    ylab("Množství") +
+    ggtitle("Hmotnost (kg)")
+
+
+grid.arrange(pl1, pl2, pl3, pl4, pl5, pl6, ncol = 2)
+```
+
+# Interpretace shluků
+
+
+## Shluk 1 (*První vůz - cenová nenáročnost, pohyblivost, mobilita*)
+  * nízká cena
+  * malý objem válců
+  * nízký výkon
+  * nízká rychlost
+  * vysoké zrychlení
+  * malá hmotnost
+  
+  *Interpretace*: Tyto modely potěší cenovou nenáročností, nicméně je vykoupena nižším výkonem i nižší rychlostí. Auto však má menší hmotnost, a tak je pohyblivější.
+  
+  *Zástupci*: Alfa Romeo MiTo, Fiat Panda, Opel Agila
+
+
+## Shluk 2 (*Kombinace obou světů - rychlý, ovladatelný, výkonný*)
+  * průměrná cena
+  * střední objem válců
+  * střední výkon
+  * střední rychlost
+  * střední zrychlení
+  * střední hmotnost
+  
+  *Interpretace*: Tyto modely kombinují nejlepší vlastnosti z obou světů - mají vyšší cenu než nejlevnější kategorie, za to však zákazník dostane vyšší výkon a rychlost.
+  
+  *Zástupci*: Mercedes B, Opel Astra GTC, Mazda 6 Sport Kombi
+
+
+## Shluk 3 (*Kvalita a síla*)
+  * vyšší cena
+  * vysoký objem válců
+  * vyšší výkon
+  * nejvyšší rychlost
+  * menší zrychlení
+  * vyšší hmotnost
+
+  *Interpretace*: Zdaleka nejražší modely s bezkonkurenčním výkonem, velkou hmotností a rychlostí. Vyšší hmotnost je vykoupena menšm zrychlením.
+  
+  *Zástupci*: Citroen c5, Nissan X-Trail
+

@@ -1,0 +1,183 @@
+---
+title: "Úkol 1 - Průzkumová analýza dat a metoda hlavních komponent"
+subtitle: "4ST512 Vícerozměrná statistika"
+author: "Jiří Filip"
+output: pdf_document
+---
+
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+```
+
+```{r include = FALSE}
+
+library(foreign)
+library(tidyverse)
+library(bootstrap)
+library(ggfortify)
+library(MVN)
+library(haven)
+library(reshape)
+library(car)
+library(gridExtra)
+```
+
+# Úvod
+
+V této práci budeme analyzovat 6 údajů (obvod ramen, hrudníku, pasu, boků, lýtek a zápěstí) 254 žen. Nejprve tato data prozkoumáme s ohledem na marginální a sdruženou pravděpodobnost, identifikujeme případné odchylky od normality a odlehlá pozorování. Následně na datech spustíme metodu hlavních komponent a pokusíme se interpretovat její výsledky.
+
+
+
+
+```{r}
+data.spss <- read.csv("data/ukol1.csv")[,-1]
+
+#write.csv(data.spss, "data.csv")
+
+data.raw <- tbl_df(data.spss)
+
+rowname_labels <- sapply(data.spss, function (col) attr(col, "label")) %>% unname %>% unlist
+
+colname_labels <- c("id", "Obvod ramen", "Obvod hrudníku", "Obvod pasu", "Obvod boků", "Obvod lýtka (průměr)", "Obvod zápěstí (průměr)")
+```
+
+
+# Posouzení normality jednotlivých proměnných
+
+Podíváme se na marginální rozdělení všech proměnných. Začneme nejprve histogramy.
+
+```{r include = FALSE}
+colnames(data.raw) <- colname_labels
+
+data.raw_gathered <- 
+  data.raw[,-1] %>%
+  keep(is.numeric) %>%
+  gather()
+```
+
+
+
+```{r message = FALSE}
+
+data.raw_gathered %>%
+  ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram(bins=30) +
+    xlab("Hodnota") +
+    ylab("Počet") %>% invisible()
+```  
+
+
+Můžeme vidět, že jednotlivé veličiny se zhruba řídí normálním rozdělením, u obvodu pasu je toto rozdělení však značně zešikmeté. Lze se proto debatovat, zda by se toto rozdělení dalo vůbec nazvat normálním.
+
+U všech veličin je ale jasně patrné, že se zde vyskytuje hned několik odlehlých pozorování, většinou na pravé straně rozdělení. To by znamenalo, že extrémy zde příliš nejsou, když se jedná o malé obvody, ale vyskytují se spíše u obvodů velkých. Mohlo by to znamenat, že zde máme spíše obezní než podvyživené jedince.
+
+Nyní, když víme, že pozorování se zhruba řídí normálním rozdělením, zbývá identifikovat odlehlá pozorování a zjistit, zda se jedná o chybná měření, nebo zda se takoví jedinci opravdu mohou v populaci vyskytovat.
+
+Pokud se na histogramy podíváme, vidíme, že odlehlé hodnoty nejsou tak extrémní, že by je nebylo možné vysvětlit např. obezitou (např. obvod pasu kolem 100 cm nebo obvod ramen kolem 130 cm). To by naznačovalo, že se o chybná měření nejedná.
+
+
+
+
+Podívejme se ještě na Q-Q graf jednotlivých veličin, z něhož jsou odlehlá pozorování rovněž patrná. U obvodu pasu je znovu vidět, že zešikmení narušuje normalitu.
+
+```{r, fig.height=3.5}
+data.raw_gathered %>%
+  ggplot(aes(sample = value)) +
+    facet_wrap(~ key, scales = "free") +
+    stat_qq() +
+    stat_qq_line() +
+    ylab("Výběr") +
+    xlab("Teoretické")
+```
+
+Pro samotnou identifikaci odlehlých pozorování použijme boxplot. Označme si jednotlivá pozorování jejich identifikačním číslem.
+
+```{r fig.width=10, fig.height=5}
+
+
+# 
+# data.raw_gathered %>%
+#   ggplot() + 
+#   geom_boxplot(aes(1, value), outlier.color = "red", outlier.size = 4, 
+#                outlier.shape = 1) +
+#   facet_wrap(~ key, scales = "free_y") +
+#   theme(axis.title.x=element_blank(),
+#         axis.text.x=element_blank(),
+#         axis.ticks.x=element_blank()) 
+# 
+
+
+
+par(mfrow = c(1, 6))
+for (col_idx in 2:ncol(data.raw)) {
+  Boxplot(data.raw[,col_idx], xlab = colname_labels[col_idx])
+}
+
+```
+
+Z boxplotu snadněji vyčteme, která pozorování jsou přesně odlehlá. Např. pozorování č. 44 je odlehlé ve všech boxplotech, patrně se jedná o obézní ženu. Stejně tak žena č. 8 (která není uvedená jako odlehlá ve všech, ale ve většině ano). Pozorování č. 161 má velký obvod hrudníku a pasu, mohlo by se jednat o těhotnou ženu.
+
+Lze vidět, že obvod pasu má zdaleka nejvíce odlehlých hodnot. Toto by se dalo vysvětlit právě těhotenstvím. Např. žena č. 37 se nevyskytuje jako odlehlá hodnota u ostatních proměnných. Posouzení vícerozměrné normality a odlehlých hodnot však provedeme pomocí chí-kvadrát diagramu.
+
+
+# Posouzení vícerozměrné normality
+
+Podívejme se na chi-kvadrát diagram k posouzení vícerozměrné normality.
+
+```{r fig.height=4, fig.align="center"}
+
+#par(mfrow=c(1,2))
+mvn(data.raw[,-1], multivariatePlot = "qq") %>% invisible()
+#data.without.outliers <- mvn(data.raw[,-1], multivariateOutlierMethod = "quan", #showOutliers = TRUE, showNewData = TRUE) %>% invisible()
+```
+
+
+Odhlehlá pozorování jsou následující: Z004, Z008, Z037, Z044, Z049, Z095, Z154, Z160, Z183, Z222, Z232, Z237, Z243, Z248, Z253
+
+Mohlo by se jednat jak o těhotné (např. žena č. 37), tak o obézní ženy (č. 44).
+
+Kromě odlehlých pozorování lze na grafu vidět, že obvody se řídí vícerozměrným normálním rozdělením (až na odlehlé hodnoty, které značně vybočují).
+
+# Metoda hlavních komponent
+
+Pomocí metody hlavních komponent budeme analyzovat korelační matici (proměnné nemají stejnou škálu, průměry a rozptyly se liší). Lze vidět, že již první komponenta vysvětluje 73,9 % variability původních dat. První tři komponenty pak vysvětlují přes 90 % celkové variability. Řekněme tedy, že data mají dimenzionalitu 3.
+
+```{r}
+data.pca <- prcomp(data.raw[,-1], scale = TRUE, center = TRUE)
+
+summary(data.pca)
+```
+
+Na screeplotu si prohlédněme variabilitu v závislosti na hlavní komponentě. Můžeme vidět, že první 3 komponenty vysvětlují většinu původních proměnných.
+
+```{r}
+screeplot(data.pca, type = "lines", main = "Screeplot")
+```
+
+Na dvou obrázcích dole si můžeme prohlédnout projekci do prostoru založeného na prvních dvou hlavních komponentách. Kromě toho lze vidět jednotlivé zátěže, které nám ukazují promítnutí původních proměnných do podprostoru hlavních komponent 1 a 2. Ze zátěží rovněž vyčteme, že rozměry jsou mezi sebou závislé (obvod ramen a obvod boků, pasu a hrudníku, zápěstí a lýtek). Dává smysl, že obvod ramen nám dává informaci o obvodu boků, stejně tak u dalších dvou závislých dvojic.
+
+Druhý z obrázků obsahuje i identifikační číslo ženy. Můžeme vidět odlehlá pozorování (např. žena č. 44, 161 nebo 232). 
+
+```{r fig.width=10}
+
+p1 <- autoplot(data.pca, data = data.raw, loadings = TRUE, loadings.label = TRUE, loadings.colour = "blue")
+p2 <- autoplot(data.pca, data = data.raw, label = TRUE)
+grid.arrange(p1, p2, ncol = 2)
+```
+
+Nedá se jednoznačně říci, že by hlavní komponenty šly nějak přesně interpretovat. Přesto se o to pokusme. Všechny proměnné mají velmi podobnou korelaci s první hlavní komponentou (okolo 0,4). Můžeme tak první hlavní komponentu interpretovat jako "mohutnost" subjektu.
+
+Druhá komponenta je silně (circa -0,56) negativně korelována s obvodem lýtek a zápěstí, zatímco je zde nezanedbatelná korelace s obvodem pasu a hrudníku. 
+
+Když tedy PC2 roste, klesá obvod lýtek a zápěstí, zatímco se zvyšuje obvod pasu a hrudníku. Nabízí se možnost uvažovat například nad těhotenstvím, i když to zní poněkud absurdně. PC2 by mohlo vyjadřovat "stádium těhotenství" (např. počet měsíců), kdy by při rostoucím počtu měsíce ženě rostl pas a hrudník (prsa). Nesmíme ale zapomenout na negativní korelaci s obvodem lýtek a zápěstí. S rostoucí dobou těhotenství by se potom tyto dva obvody musely snižovat, což zní poněkud nepravděpodobně.
+
+Třetí komponenta je ještě rozporuplnější. Silně koreluje s obvodem boků a lýtek, naopak záporně s obvodem ramen, hrudníku a zápěstí. S velkou nadsázkou bychom mohli interpretovat třetí komponentu jako "mohutnost dolní poloviny těla", ale i tak by to nevysvětlilo, proč by tato "mohutnost" negativně korelovala s obvodem ramen, hrudníku a zápěstí. 
+
+```{r}
+
+rownames(data.pca$rotation) <- colname_labels[-1]
+data.pca$rotation
+```
+
